@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/Masterminds/squirrel"
-	"github.com/beego/beego/v2/client/orm"
 	"github.com/google/uuid"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
@@ -20,7 +19,7 @@ var _ = Describe("MediaRepository", func() {
 	BeforeEach(func() {
 		ctx := log.NewContext(context.TODO())
 		ctx = request.WithUser(ctx, model.User{ID: "userid"})
-		mr = NewMediaFileRepository(ctx, orm.NewOrm())
+		mr = NewMediaFileRepository(ctx, getDBXBuilder())
 	})
 
 	It("gets mediafile from the DB", func() {
@@ -156,6 +155,31 @@ var _ = Describe("MediaRepository", func() {
 
 			Expect(mf.PlayDate.Unix()).To(Equal(playDate.Unix()))
 			Expect(mf.PlayCount).To(Equal(int64(1)))
+		})
+
+		It("preserves play date if and only if provided date is older", func() {
+			id := "incplay.playdate"
+			Expect(mr.Put(&model.MediaFile{ID: id})).To(BeNil())
+			playDate := time.Now()
+			Expect(mr.IncPlayCount(id, playDate)).To(BeNil())
+			mf, err := mr.Get(id)
+			Expect(err).To(BeNil())
+			Expect(mf.PlayDate.Unix()).To(Equal(playDate.Unix()))
+			Expect(mf.PlayCount).To(Equal(int64(1)))
+
+			playDateLate := playDate.AddDate(0, 0, 1)
+			Expect(mr.IncPlayCount(id, playDateLate)).To(BeNil())
+			mf, err = mr.Get(id)
+			Expect(err).To(BeNil())
+			Expect(mf.PlayDate.Unix()).To(Equal(playDateLate.Unix()))
+			Expect(mf.PlayCount).To(Equal(int64(2)))
+
+			playDateEarly := playDate.AddDate(0, 0, -1)
+			Expect(mr.IncPlayCount(id, playDateEarly)).To(BeNil())
+			mf, err = mr.Get(id)
+			Expect(err).To(BeNil())
+			Expect(mf.PlayDate.Unix()).To(Equal(playDateLate.Unix()))
+			Expect(mf.PlayCount).To(Equal(int64(3)))
 		})
 
 		It("increments play count on newly starred items", func() {

@@ -1,20 +1,20 @@
 package migrations
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 
-	"github.com/kennygrant/sanitize"
+	"github.com/deluan/sanitize"
 	"github.com/navidrome/navidrome/log"
-
-	"github.com/pressly/goose"
+	"github.com/pressly/goose/v3"
 )
 
 func init() {
-	goose.AddMigration(upAddOrderTitleToMediaFile, downAddOrderTitleToMediaFile)
+	goose.AddMigrationContext(upAddOrderTitleToMediaFile, downAddOrderTitleToMediaFile)
 }
 
-func upAddOrderTitleToMediaFile(tx *sql.Tx) error {
+func upAddOrderTitleToMediaFile(_ context.Context, tx *sql.Tx) error {
 	_, err := tx.Exec(`
 alter table main.media_file
 	add order_title varchar null collate NOCASE;
@@ -57,6 +57,6 @@ func upAddOrderTitleToMediaFile_populateOrderTitle(tx *sql.Tx) error {
 	return rows.Err()
 }
 
-func downAddOrderTitleToMediaFile(tx *sql.Tx) error {
+func downAddOrderTitleToMediaFile(_ context.Context, tx *sql.Tx) error {
 	return nil
 }

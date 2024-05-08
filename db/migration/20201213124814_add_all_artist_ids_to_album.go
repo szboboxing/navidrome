@@ -1,18 +1,19 @@
 package migrations
 
 import (
+	"context"
 	"database/sql"
 
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/utils"
-	"github.com/pressly/goose"
+	"github.com/pressly/goose/v3"
 )
 
 func init() {
-	goose.AddMigration(Up20201213124814, Down20201213124814)
+	goose.AddMigrationContext(Up20201213124814, Down20201213124814)
 }
 
-func Up20201213124814(tx *sql.Tx) error {
+func Up20201213124814(_ context.Context, tx *sql.Tx) error {
 	_, err := tx.Exec(`
 alter table album
 	add all_artist_ids varchar;
@@ -58,6 +59,6 @@ select a.id, a.name, a.artist_id, a.album_artist_id, group_concat(mf.artist_id, 
 	return rows.Err()
 }
 
-func Down20201213124814(tx *sql.Tx) error {
+func Down20201213124814(_ context.Context, tx *sql.Tx) error {
 	return nil
 }

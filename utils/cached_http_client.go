@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ReneKroon/ttlcache/v2"
+	"github.com/jellydator/ttlcache/v2"
 	"github.com/navidrome/navidrome/log"
 )
 
@@ -46,6 +46,7 @@ func NewCachedHTTPClient(wrapped httpDoer, ttl time.Duration) *CachedHTTPClient 
 		if err != nil {
 			return nil, 0, err
 		}
+		defer resp.Body.Close()
 		return c.serializeResponse(resp), ttl, nil
 	})
 	c.cache.SetNewItemCallback(func(key string, value interface{}) {

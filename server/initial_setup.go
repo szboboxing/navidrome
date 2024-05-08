@@ -3,12 +3,13 @@ package server
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"time"
 
+	"github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/navidrome/navidrome/conf"
 	"github.com/navidrome/navidrome/consts"
+	"github.com/navidrome/navidrome/core/ffmpeg"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
 )
@@ -36,9 +37,10 @@ func initialSetup(ds model.DataStore) {
 	})
 }
 
+// If the Dev Admin user is not present, create it
 func createInitialAdminUser(ds model.DataStore, initialPassword string) error {
 	users := ds.User(context.TODO())
-	c, err := users.CountAll()
+	c, err := users.CountAll(model.QueryOptions{Filters: squirrel.Eq{"user_name": consts.DevInitialUserName}})
 	if err != nil {
 		panic(fmt.Sprintf("Could not access User table: %s", err))
 	}
@@ -77,9 +79,9 @@ func createJWTSecret(ds model.DataStore) error {
 }
 
 func checkFfmpegInstallation() {
-	path, err := exec.LookPath("ffmpeg")
+	f := ffmpeg.New()
+	_, err := f.CmdPath()
 	if err == nil {
-		log.Info("Found ffmpeg", "path", path)
 		return
 	}
 	log.Warn("Unable to find ffmpeg. Transcoding will fail if used", err)
@@ -92,9 +94,9 @@ func checkFfmpegInstallation() {
 func checkExternalCredentials() {
 	if conf.Server.EnableExternalServices {
 		if !conf.Server.LastFM.Enabled {
-			log.Info("Last.FM integration is DISABLED")
+			log.Info("Last.fm integration is DISABLED")
 		} else {
-			log.Debug("Last.FM integration is ENABLED")
+			log.Debug("Last.fm integration is ENABLED")
 		}
 
 		if !conf.Server.ListenBrainz.Enabled {

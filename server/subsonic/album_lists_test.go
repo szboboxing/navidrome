@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 
 	"github.com/navidrome/navidrome/server/subsonic/responses"
+	"github.com/navidrome/navidrome/utils/req"
 
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
@@ -14,8 +15,8 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Describe("AlbumListController", func() {
-	var controller *AlbumListController
+var _ = Describe("Album Lists", func() {
+	var router *Router
 	var ds model.DataStore
 	var mockRepo *tests.MockAlbumRepo
 	var w *httptest.ResponseRecorder
@@ -24,7 +25,7 @@ var _ = Describe("AlbumListController", func() {
 	BeforeEach(func() {
 		ds = &tests.MockDataStore{}
 		mockRepo = ds.Album(ctx).(*tests.MockAlbumRepo)
-		controller = NewAlbumListController(ds, nil)
+		router = New(ds, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 		w = httptest.NewRecorder()
 	})
 
@@ -34,9 +35,9 @@ var _ = Describe("AlbumListController", func() {
 			mockRepo.SetData(model.Albums{
 				{ID: "1"}, {ID: "2"},
 			})
-			resp, err := controller.GetAlbumList(w, r)
+			resp, err := router.GetAlbumList(w, r)
 
-			Expect(err).To(BeNil())
+			Expect(err).ToNot(HaveOccurred())
 			Expect(resp.AlbumList.Album[0].Id).To(Equal("1"))
 			Expect(resp.AlbumList.Album[1].Id).To(Equal("2"))
 			Expect(w.Header().Get("x-total-count")).To(Equal("2"))
@@ -46,22 +47,18 @@ var _ = Describe("AlbumListController", func() {
 
 		It("should fail if missing type parameter", func() {
 			r := newGetRequest()
-			_, err := controller.GetAlbumList(w, r)
-			var subErr subError
-			isSubError := errors.As(err, &subErr)
+			_, err := router.GetAlbumList(w, r)
 
-			Expect(isSubError).To(BeTrue())
-			Expect(subErr).To(MatchError("required 'type' parameter is missing"))
-			Expect(subErr.code).To(Equal(responses.ErrorMissingParameter))
+			Expect(err).To(MatchError(req.ErrMissingParam))
 		})
 
 		It("should return error if call fails", func() {
 			mockRepo.SetError(true)
 			r := newGetRequest("type=newest")
 
-			_, err := controller.GetAlbumList(w, r)
+			_, err := router.GetAlbumList(w, r)
 
-			Expect(err).ToNot(BeNil())
+			Expect(err).To(MatchError(errSubsonic))
 			var subErr subError
 			errors.As(err, &subErr)
 			Expect(subErr.code).To(Equal(responses.ErrorGeneric))
@@ -74,9 +71,9 @@ var _ = Describe("AlbumListController", func() {
 			mockRepo.SetData(model.Albums{
 				{ID: "1"}, {ID: "2"},
 			})
-			resp, err := controller.GetAlbumList2(w, r)
+			resp, err := router.GetAlbumList2(w, r)
 
-			Expect(err).To(BeNil())
+			Expect(err).ToNot(HaveOccurred())
 			Expect(resp.AlbumList2.Album[0].Id).To(Equal("1"))
 			Expect(resp.AlbumList2.Album[1].Id).To(Equal("2"))
 			Expect(w.Header().Get("x-total-count")).To(Equal("2"))
@@ -86,24 +83,21 @@ var _ = Describe("AlbumListController", func() {
 
 		It("should fail if missing type parameter", func() {
 			r := newGetRequest()
-			_, err := controller.GetAlbumList2(w, r)
 
-			var subErr subError
-			errors.As(err, &subErr)
+			_, err := router.GetAlbumList2(w, r)
 
-			Expect(subErr).To(MatchError("required 'type' parameter is missing"))
-			Expect(subErr.code).To(Equal(responses.ErrorMissingParameter))
+			Expect(err).To(MatchError(req.ErrMissingParam))
 		})
 
 		It("should return error if call fails", func() {
 			mockRepo.SetError(true)
 			r := newGetRequest("type=newest")
 
-			_, err := controller.GetAlbumList2(w, r)
+			_, err := router.GetAlbumList2(w, r)
 
+			Expect(err).To(MatchError(errSubsonic))
 			var subErr subError
 			errors.As(err, &subErr)
-			Expect(subErr).ToNot(BeNil())
 			Expect(subErr.code).To(Equal(responses.ErrorGeneric))
 		})
 	})

@@ -2,21 +2,26 @@ package db
 
 import (
 	"database/sql"
+	"embed"
 	"fmt"
-	"os"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/navidrome/navidrome/conf"
 	_ "github.com/navidrome/navidrome/db/migration"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/utils/singleton"
-	"github.com/pressly/goose"
+	"github.com/pressly/goose/v3"
 )
 
 var (
 	Driver = "sqlite3"
 	Path   string
 )
+
+//go:embed migration/*.sql
+var embedMigrations embed.FS
+
+const migrationsFolder = "migration"
 
 func Db() *sql.DB {
 	return singleton.GetInstance(func() *sql.DB {
@@ -34,7 +39,12 @@ func Db() *sql.DB {
 	})
 }
 
-func EnsureLatestVersion() {
+func Close() error {
+	log.Info("Closing Database")
+	return Db().Close()
+}
+
+func Init() {
 	db := Db()
 
 	// Disable foreign_keys to allow re-creating tables in migrations
@@ -50,25 +60,50 @@ func EnsureLatestVersion() {
 	}
 
 	gooseLogger := &logAdapter{silent: isSchemaEmpty(db)}
-	goose.SetLogger(gooseLogger)
+	goose.SetBaseFS(embedMigrations)
 
 	err = goose.SetDialect(Driver)
 	if err != nil {
-		log.Error("Invalid DB driver", "driver", Driver, err)
-		os.Exit(1)
+		log.Fatal("Invalid DB driver", "driver", Driver, err)
 	}
-	err = goose.Run("up", db, "./")
+	if !isSchemaEmpty(db) && hasPendingMigrations(db, migrationsFolder) {
+		log.Info("Upgrading DB Schema to latest version")
+	}
+	goose.SetLogger(gooseLogger)
+	err = goose.Up(db, migrationsFolder)
 	if err != nil {
-		log.Error("Failed to apply new migrations", err)
-		os.Exit(1)
+		log.Fatal("Failed to apply new migrations", err)
 	}
 }
 
-func isSchemaEmpty(db *sql.DB) bool { // nolint:interfacer
+type statusLogger struct{ numPending int }
+
+func (*statusLogger) Fatalf(format string, v ...interface{}) { log.Fatal(fmt.Sprintf(format, v...)) }
+func (l *statusLogger) Printf(format string, v ...interface{}) {
+	if len(v) < 1 {
+		return
+	}
+	if v0, ok := v[0].(string); !ok {
+		return
+	} else if v0 == "Pending" {
+		l.numPending++
+	}
+}
+
+func hasPendingMigrations(db *sql.DB, folder string) bool {
+	l := &statusLogger{}
+	goose.SetLogger(l)
+	err := goose.Status(db, folder)
+	if err != nil {
+		log.Fatal("Failed to check for pending migrations", err)
+	}
+	return l.numPending > 0
+}
+
+func isSchemaEmpty(db *sql.DB) bool {
 	rows, err := db.Query("SELECT name FROM sqlite_master WHERE type='table' AND name='goose_db_version';") // nolint:rowserrcheck
 	if err != nil {
-		log.Error("Database could not be opened!", err)
-		os.Exit(1)
+		log.Fatal("Database could not be opened!", err)
 	}
 	defer rows.Close()
 	return !rows.Next()
@@ -79,13 +114,11 @@ type logAdapter struct {
 }
 
 func (l *logAdapter) Fatal(v ...interface{}) {
-	log.Error(fmt.Sprint(v...))
-	os.Exit(-1)
+	log.Fatal(fmt.Sprint(v...))
 }
 
 func (l *logAdapter) Fatalf(format string, v ...interface{}) {
-	log.Error(fmt.Sprintf(format, v...))
-	os.Exit(-1)
+	log.Fatal(fmt.Sprintf(format, v...))
 }
 
 func (l *logAdapter) Print(v ...interface{}) {

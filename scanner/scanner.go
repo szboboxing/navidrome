@@ -9,16 +9,15 @@ import (
 	"time"
 
 	"github.com/navidrome/navidrome/core"
+	"github.com/navidrome/navidrome/core/artwork"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
 	"github.com/navidrome/navidrome/server/events"
-	"github.com/navidrome/navidrome/utils"
 )
 
 type Scanner interface {
 	RescanAll(ctx context.Context, fullRescan bool) error
 	Status(mediaFolder string) (*StatusInfo, error)
-	Scanning() bool
 }
 
 type StatusInfo struct {
@@ -39,7 +38,7 @@ type FolderScanner interface {
 	Scan(ctx context.Context, lastModifiedSince time.Time, progress chan uint32) (int64, error)
 }
 
-var isScanning utils.AtomicBool
+var isScanning sync.Mutex
 
 type scanner struct {
 	folders     map[string]FolderScanner
@@ -47,8 +46,8 @@ type scanner struct {
 	lock        *sync.RWMutex
 	ds          model.DataStore
 	pls         core.Playlists
-	cacheWarmer core.CacheWarmer
 	broker      events.Broker
+	cacheWarmer artwork.CacheWarmer
 }
 
 type scanStatus struct {
@@ -58,15 +57,15 @@ type scanStatus struct {
 	lastUpdate  time.Time
 }
 
-func New(ds model.DataStore, playlists core.Playlists, cacheWarmer core.CacheWarmer, broker events.Broker) Scanner {
+func New(ds model.DataStore, playlists core.Playlists, cacheWarmer artwork.CacheWarmer, broker events.Broker) Scanner {
 	s := &scanner{
 		ds:          ds,
 		pls:         playlists,
-		cacheWarmer: cacheWarmer,
 		broker:      broker,
 		folders:     map[string]FolderScanner{},
 		status:      map[string]*scanStatus{},
 		lock:        &sync.RWMutex{},
+		cacheWarmer: cacheWarmer,
 	}
 	s.loadFolders()
 	return s
@@ -112,11 +111,13 @@ func (s *scanner) startProgressTracker(mediaFolder string) (chan uint32, context
 	go func() {
 		s.broker.SendMessage(ctx, &events.ScanStatus{Scanning: true, Count: 0, FolderCount: 0})
 		defer func() {
-			s.broker.SendMessage(ctx, &events.ScanStatus{
-				Scanning:    false,
-				Count:       int64(s.status[mediaFolder].fileCount),
-				FolderCount: int64(s.status[mediaFolder].folderCount),
-			})
+			if status, ok := s.getStatus(mediaFolder); ok {
+				s.broker.SendMessage(ctx, &events.ScanStatus{
+					Scanning:    false,
+					Count:       int64(status.fileCount),
+					FolderCount: int64(status.folderCount),
+				})
+			}
 		}()
 		for {
 			select {
@@ -138,34 +139,11 @@ func (s *scanner) startProgressTracker(mediaFolder string) (chan uint32, context
 	return progress, cancel
 }
 
-func (s *scanner) RescanAll(ctx context.Context, fullRescan bool) error {
-	if s.Scanning() {
-		log.Debug("Scanner already running, ignoring request for rescan.")
-		return ErrAlreadyScanning
-	}
-	isScanning.Set(true)
-	defer isScanning.Set(false)
-
-	defer s.cacheWarmer.Flush(ctx)
-	var hasError bool
-	for folder := range s.folders {
-		err := s.rescan(ctx, folder, fullRescan)
-		hasError = hasError || err != nil
-	}
-	if hasError {
-		log.Error("Errors while scanning media. Please check the logs")
-		return ErrScanError
-	}
-	return nil
-}
-
-func (s *scanner) getStatus(folder string) *scanStatus {
+func (s *scanner) getStatus(folder string) (scanStatus, bool) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
-	if status, ok := s.status[folder]; ok {
-		return status
-	}
-	return nil
+	status, ok := s.status[folder]
+	return *status, ok
 }
 
 func (s *scanner) incStatusCounter(folder string, numFiles uint32) (totalFolders uint32, totalFiles uint32) {
@@ -199,13 +177,30 @@ func (s *scanner) setStatusEnd(folder string, lastUpdate time.Time) {
 	}
 }
 
-func (s *scanner) Scanning() bool {
-	return isScanning.Get()
-}
+func (s *scanner) RescanAll(ctx context.Context, fullRescan bool) error {
+	ctx = context.WithoutCancel(ctx)
+	if !isScanning.TryLock() {
+		log.Debug(ctx, "Scanner already running, ignoring request for rescan.")
+		return ErrAlreadyScanning
+	}
+	defer isScanning.Unlock()
 
+	var hasError bool
+	for folder := range s.folders {
+		err := s.rescan(ctx, folder, fullRescan)
+		hasError = hasError || err != nil
+	}
+	if hasError {
+		log.Error(ctx, "Errors while scanning media. Please check the logs")
+		core.WriteAfterScanMetrics(ctx, s.ds, false)
+		return ErrScanError
+	}
+	core.WriteAfterScanMetrics(ctx, s.ds, true)
+	return nil
+}
 func (s *scanner) Status(mediaFolder string) (*StatusInfo, error) {
-	status := s.getStatus(mediaFolder)
-	if status == nil {
+	status, ok := s.getStatus(mediaFolder)
+	if !ok {
 		return nil, errors.New("mediaFolder not found")
 	}
 	return &StatusInfo{

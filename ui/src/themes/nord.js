@@ -2,9 +2,6 @@
 const musicListActions = {
   alignItems: 'center',
   '@global': {
-    button: {
-      margin: 5,
-    },
     'button:first-child:not(:only-child)': {
       '@media screen and (max-width: 720px)': {
         transform: 'scale(1.5)',
@@ -292,6 +289,8 @@ export default {
         fontSize: '.875rem',
         color: 'rgba(255,255,255, 0.8)',
       },
+    },
+    NDCollapsibleComment: {
       commentBlock: {
         fontSize: '.875rem',
         color: 'rgba(255,255,255, 0.8)',
